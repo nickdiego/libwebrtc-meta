@@ -1,0 +1,133 @@
+#!/bin/bash
+
+function assert_dir() {
+    local dir="${1}"
+    if [ ! -x "${dir}" ]; then
+        echo "'${name}' does not exist or is not a directory; exiting."
+        exit 1
+    fi
+}
+
+function assert_prog() {
+    local prog="${1}"
+    local name="${2}"
+    if [ ! -x "${prog}" ]; then
+        echo "${name} does not exist or is not executable; exiting."
+        exit 1
+    fi
+}
+
+function sanity_check() {
+    if [[ -z "${GCLIENT}" ]] || [[ -z "${NINJA}" ]]; then
+        if [ -z ${DEPOT_TOOLS} ]; then
+            if [ -d "$(pwd)"/depot_tools ]; then
+                export DEPOT_TOOLS="$(pwd)"/depot_tools
+            else
+                export DEPOT_TOOLS=$(dirname $(which gclient))
+            fi
+        fi
+        assert_dir "${DEPOT_TOOLS}"
+
+        if [ -z "${GCLIENT}" ]; then
+            export GCLIENT="${DEPOT_TOOLS}"/gclient
+        fi
+        assert_prog "${GCLIENT}"
+
+        if [ -z "${NINJA}" ]; then
+            export NINJA="${DEPOT_TOOLS}"/ninja
+        fi
+        assert_prog "${NINJA}"
+    fi
+
+    if [ -z "${LIBWEBRTC_REVISION}" ]; then
+        export LIBWEBRTC_REVISION=4804
+    fi
+}
+
+function fetch_and_sync() {
+    sanity_check
+    # Now let's fetch and sync the code to the specified revision.
+    ${GCLIENT} config http://webrtc.googlecode.com/svn/trunk
+    ${GCLIENT} sync --revision ${LIBWEBRTC_REVISION} --force
+}
+
+# Applying existing patches, if any.
+function apply_patches() {
+    if [ -d patches ]; then
+        pushd trunk
+        for p in ../patches/*.patch; do
+            patch -u -N -p1 -f --no-backup-if-mismatch -i "${p}"
+        done
+        popd
+    fi
+}
+
+function make_lib() {
+    pushd trunk
+    mkdir -p .lib
+    pushd .lib
+    rm -f *
+    for l in $(find ../out/Release -name "*.a"); do
+        ar x ${l}
+    done
+    ar rcs libWebRTC.a *.o
+    rm -f *.o
+    popd
+    popd
+}
+
+function build_libwebrtc() {
+    sanity_check
+    pushd trunk
+    python2 build/gyp_chromium --depth=. -Dextra_gyp_flag=0 -Dinclude_tests=0 -Denable_google_now=0 -Dlogging=0 all.gyp
+    ${NINJA} -C out/Release
+    popd
+}
+
+function install_libwebrtc() {
+    if [ ! -e trunk/.lib/libWebRTC.a ]; then
+        echo "libwebrtc.a does not exist; maybe it wasn't built? exiting."
+        exit 1
+    fi
+    install -d -m755 ${DESTDIR}${JHBUILD_PREFIX}/libwebrtc
+    install -m644 trunk/.lib/libWebRTC.a ${DESTDIR}${JHBUILD_PREFIX}/libwebrtc
+}
+
+function get_depot_tools() {
+    git submodule init
+    git submodule update
+}
+
+case "${1}" in
+    sync)
+        fetch_and_sync
+        apply_patches
+        ;;
+    patch)
+        apply_patches
+        ;;
+    build)
+        build_libwebrtc
+        make_lib
+        ;;
+    install)
+        install_libwebrtc
+        ;;
+    fetch_and_build)
+        fetch_and_sync
+        apply_patches
+        build_libwebrtc
+        make_lib
+        ;;
+    bootstrap)
+        get_depot_tools
+        fetch_and_sync
+        apply_patches
+        ;;
+    library)
+        make_lib
+        ;;
+    *)
+        echo "Usage: ${0} {sync|patch|build|fetch_and_build|install|bootstrap|library}"
+        exit 1
+esac
