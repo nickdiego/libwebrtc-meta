@@ -1,0 +1,16 @@
+diff --git a/build/common.gypi b/build/common.gypi
+index 360f81a..6b3e748 100644
+--- a/build/common.gypi
++++ b/build/common.gypi
+@@ -4602,9 +4602,9 @@
+       },
+     }],
+     # Don't warn about the "typedef 'foo' locally defined but not used"
+-    # for gcc 4.8.
++    # for gcc 4.7.
+     # TODO: remove this flag once all builds work. See crbug.com/227506
+-    ['gcc_version>=48', {
++    ['gcc_version>=47', {
+       'target_defaults': {
+         'cflags': [
+           '-Wno-unused-local-typedefs',
